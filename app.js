@@ -34,16 +34,19 @@ app.post("/move-order-to-shipday", function (req, res) {
 
   const shipdayClient = new Shipday(process.env[storeApi] || process.env.MAIN_SHIPDAY_API, 10000);
 
-  let deliveryTime = payload.job_delivery_datetime?.split(' ');
+  let deliveryTime = payload.job_delivery_datetime;
   if (!deliveryTime) {
     console.error("Invalid delivery time format.");
     return res.status(400).send("Bad request: Invalid delivery time format.");
   }
-  let pickupTime = payload.job_pickup_datetime?.split(' ');
+  let pickupTime = payload.job_pickup_datetime;
   if (!pickupTime) {
     console.error("Invalid pickup time format.");
     return res.status(400).send("Bad request: Invalid pickup time format.");
   }
+
+  deliveryTime = new Date(deliveryTime + " GMT-0700");
+  pickupTime = new Date(pickupTime + " GMT-0700");
 
   const addRowQuery = `
     mutation {
@@ -51,7 +54,7 @@ app.post("/move-order-to-shipday", function (req, res) {
           board_id: 6343774897,
           group_id: "topics",
           item_name: "${payload.job_id}",
-          column_values: "{\\"status\\": \\"Pending\\", \\"text7\\": \\"${payload.task_type == 1 ? "Pickup" : "Delivery"}\\", \\"text\\": \\"${payload.merchant_name}\\", \\"text5\\": \\"${payload.customer_username}\\", \\"date4\\": {\\"date\\":\\"${convertDateFormat(deliveryTime[0])}\\", \\"time\\":\\"${convertTo24Hour(deliveryTime[1] + " " + deliveryTime[2])}\\"}, \\"location\\": {\\"lat\\":\\"1\\", \\"lng\\":\\"1\\", \\"address\\":\\"${payload.job_pickup_address}\\"}, \\"location3\\": {\\"lat\\":\\"1\\", \\"lng\\":\\"1\\", \\"address\\":\\"${payload.job_address}\\"}}"
+          column_values: "{\\"status\\": \\"Pending\\", \\"text7\\": \\"${payload.task_type == 1 ? "Pickup" : "Delivery"}\\", \\"text\\": \\"${payload.merchant_name}\\", \\"text5\\": \\"${payload.customer_username}\\", \\"date4\\": {\\"date\\":\\"${extractDate(deliveryTime)}\\", \\"time\\":\\"${extractTime(deliveryTime)}\\"}, \\"location\\": {\\"lat\\":\\"1\\", \\"lng\\":\\"1\\", \\"address\\":\\"${payload.job_pickup_address}\\"}, \\"location3\\": {\\"lat\\":\\"1\\", \\"lng\\":\\"1\\", \\"address\\":\\"${payload.job_address}\\"}}"
           ) {
           id
       }
@@ -75,9 +78,9 @@ app.post("/move-order-to-shipday", function (req, res) {
   );
 
   orderInfoRequest.setRestaurantPhoneNumber(payload.merchant_address === payload.job_address ? payload.job_pickup_phone : payload.merchant_phone_number);
-  orderInfoRequest.setExpectedDeliveryDate(convertDateFormat(deliveryTime[0]));
-  orderInfoRequest.setExpectedDeliveryTime(convertTo24Hour(deliveryTime[1] + " " + deliveryTime[2]));
-  orderInfoRequest.setExpectedPickupTime(convertTo24Hour(pickupTime[1] + " " + pickupTime[2]));
+  orderInfoRequest.setExpectedDeliveryDate(extractDate(deliveryTime));
+  orderInfoRequest.setExpectedDeliveryTime(extractTime(deliveryTime));
+  orderInfoRequest.setExpectedPickupTime(extractTime(pickupTime));
   orderInfoRequest.setPickupLatLong(payload.job_pickup_latitude, payload.job_pickup_longitude);
   orderInfoRequest.setDeliveryLatLong(payload.job_latitude, payload.job_longitude);
   
@@ -182,28 +185,23 @@ app.post("/edit-order-on-Monday", function(req, res) {
   });
 })
 
-function convertDateFormat(dateString) {
-  const dateParts = dateString.split('/');
-  const formattedDate = `${dateParts[2]}-${dateParts[0].padStart(2, '0')}-${dateParts[1].padStart(2, '0')}`;
-  
-  return formattedDate;
+function extractDate(pacificDate){
+  const year = pacificDate.getUTCFullYear();
+  const month = String(pacificDate.getUTCMonth() + 1).padStart(2, '0'); // Months are zero-based
+  const day = String(pacificDate.getUTCDate()).padStart(2, '0');
+
+  const date = `${year}-${month}-${day}`;
+  console.log('date is', date)
+  return date
 }
 
-function convertTo24Hour(time12h) {
-  const [time, period] = time12h.split(' ');
-
-  let [hours, minutes] = time.split(':');
-
-  hours = parseInt(hours);
-  minutes = parseInt(minutes);
-
-  if (period.toLowerCase() === 'pm' && hours < 12) {
-      hours += 12;
-  } else if (period.toLowerCase() === 'am' && hours === 12) {
-      hours = 0;
-  }
-
-  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00`;
+function extractTime(pacificDate){
+  const hours = String(pacificDate.getUTCHours()).padStart(2, '0');
+  const minutes = String(pacificDate.getUTCMinutes()).padStart(2, '0');
+  const seconds = String(pacificDate.getUTCSeconds()).padStart(2, '0');
+  const time = `${hours}:${minutes}:${seconds}`;
+  console.log('time is', time)
+  return time
 }
 
 function setInstructionTemplate(payload){
