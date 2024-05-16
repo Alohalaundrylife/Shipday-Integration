@@ -12,12 +12,22 @@ app.use(bodyParser.urlencoded({ extended: true }));
 require('dotenv').config()
 const mondaySdk = require('monday-sdk-js');
 const monday = mondaySdk();
+var cron = require('node-cron');
+const apiToken = process.env.MONDAY_API_KEY;
+monday.setToken(apiToken)
 
 app.get("/", function (req, res) {
   res.send('Shipday Server running here')
 });
 
-app.post("/move-order-to-shipday", function (req, res) {
+// cron.schedule('31 11 * * *', () => {
+//   console.log('Running a job at 09:35 AM in America/Los_Angeles timezone');
+// }, {
+//   scheduled: true,
+//   timezone: "America/Los_Angeles"
+// });
+
+app.post("/move-order-to-shipday", async function (req, res) {
   console.log("moving order");
   console.log(req.body);
   let payload = req.body;
@@ -28,9 +38,6 @@ app.post("/move-order-to-shipday", function (req, res) {
   }
 
   let storeApi = `SHIPDAY_API_${payload.merchant_id}`;
-
-  const apiToken = process.env.MONDAY_API_KEY;
-  monday.setToken(apiToken)
 
   const shipdayClient = new Shipday(process.env[storeApi] || process.env.MAIN_SHIPDAY_API, 10000);
 
@@ -54,7 +61,7 @@ app.post("/move-order-to-shipday", function (req, res) {
           board_id: 6343774897,
           group_id: "topics",
           item_name: "${payload.job_id}",
-          column_values: "{\\"status\\": \\"Pending\\", \\"text7\\": \\"${payload.task_type == 1 ? "Pickup" : "Delivery"}\\", \\"text\\": \\"${payload.merchant_name}\\", \\"text5\\": \\"${payload.customer_username}\\", \\"date4\\": {\\"date\\":\\"${extractDate(deliveryTime)}\\", \\"time\\":\\"${extractTime(deliveryTime)}\\"}, \\"location\\": {\\"lat\\":\\"1\\", \\"lng\\":\\"1\\", \\"address\\":\\"${payload.job_pickup_address}\\"}, \\"location3\\": {\\"lat\\":\\"1\\", \\"lng\\":\\"1\\", \\"address\\":\\"${payload.job_address}\\"}}"
+          column_values: "{\\"status\\": \\"Pending\\", \\"text7\\": \\"${payload.task_type == 1 ? "Pickup" : "Delivery"}\\", \\"text\\": \\"${payload.merchant_name}\\", \\"text5\\": \\"${payload.customer_username}\\", \\"date4\\": {\\"date\\":\\"${extractDate(deliveryTime)}\\", \\"time\\":\\"${extractTime(deliveryTime)}\\"}, \\"dup__of_delivery_time3__1\\": {\\"date\\":\\"${extractDate(pickupTime)}\\", \\"time\\":\\"${extractTime(pickupTime)}\\"}, \\"location\\": {\\"lat\\":\\"1\\", \\"lng\\":\\"1\\", \\"address\\":\\"${payload.job_pickup_address}\\"}, \\"location3\\": {\\"lat\\":\\"1\\", \\"lng\\":\\"1\\", \\"address\\":\\"${payload.job_address}\\"}}"
           ) {
           id
       }
@@ -67,6 +74,13 @@ app.post("/move-order-to-shipday", function (req, res) {
   }).catch((err)=>{
     console.error('Error sending webhook to Zapier:', err);
   })
+
+  let validStore = await validShipdayStore(payload.merchant_id+"")
+  if(!validStore){
+    res.send("Not a valid store for shipday order")
+    return
+  }
+
   const orderInfoRequest = new OrderInfoRequest(
     payload.job_id,
     payload.merchant_address === payload.job_address ? payload.merchant_name : payload.customer_username,
@@ -129,7 +143,7 @@ app.post("/move-order-to-shipday", function (req, res) {
     });
 });
 
-app.post("/edit-order-on-Monday", function(req, res) {
+app.post("/edit-order-on-Monday", async function(req, res) {
   console.log("updating order");
   console.log(req.body);
   let payload = req.body;
@@ -138,8 +152,6 @@ app.post("/edit-order-on-Monday", function(req, res) {
     return res.status(400).send('Bad request: Missing job ID in payload.');
   }
 
-  const apiToken = process.env.MONDAY_API_KEY;
-  monday.setToken(apiToken)
   const testQuery = 
   `query {
     items_page_by_column_values (limit: 50, board_id: 6343774897, columns: [{column_id: "name", column_values: ["${payload.job_id}"]}]) {
@@ -203,6 +215,41 @@ function extractTime(pacificDate){
   console.log('time is', time)
   return time
 }
+
+async function validShipdayStore(storeId){
+  const storeQuery = `
+    query {
+      boards(ids: [6337102472]) {
+        name
+        items_page  {
+          items {
+            id
+            name
+            column_values(ids: ["text"]) {
+              id
+              text
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  try {
+    const response = await monday.api(storeQuery);
+    const textValues = response.data.boards[0].items_page.items.map(item => {
+      const textColumn = item.column_values.find(col => col.id === 'text');
+      return textColumn ? textColumn.text : null;
+    }).filter(text => text !== null && text !== '');
+
+    const validStores = textValues;
+    return validStores.includes(storeId);
+  } catch (err) {
+    console.error('Error sending webhook to Zapier:', err);
+    return false;
+  }
+}
+
 
 function setInstructionTemplate(payload){
   let instructions = ''
