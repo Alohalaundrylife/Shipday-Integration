@@ -18,7 +18,7 @@ async function getTimeZoneFromCoordinates(lat, lng, timestamp) {
 
   if (data.status === 'OK') {
     console.log('timexone is', data)
-    return data.rawOffset;
+    return data.rawOffset + data.dstOffset;
   } else {
     throw new Error('Time zone lookup failed: ' + data.status);
   }
