@@ -7,6 +7,9 @@ const CardType = require("shipday/integration/order/types/card.type");
 const OrderItem = require("shipday/integration/order/request/order.item");
 const Shipday = require("shipday/integration");
 const bodyParser = require('body-parser');
+const dateTimeHandler = require('./utils/dateTimeHandler')
+const moment = require('moment-timezone');
+
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 require('dotenv').config()
@@ -20,21 +23,78 @@ app.get("/", function (req, res) {
   res.send('Shipday Server running here')
 });
 
-// cron.schedule('31 11 * * *', () => {
-//   console.log('Running a job at 09:35 AM in America/Los_Angeles timezone');
+
+// cron.schedule('36 20 * * *', () => {
+  // const now = moment().utc().format('YYYY-MM-DD');
+  // console.log(`Running cron job at: ${now} (EST)`);
+  // console.log('Running a job at 00:01 AM in America/New York timezone');
+  // let addRowQuery = 
+  // `
+  //   query {
+  //     items_page_by_column_values (
+  //         limit: 50,
+  //         board_id: 6343774897,
+  //         columns: [
+  //           { column_id: "dup__of_delivery_time3__1", column_values: ["2024-06-02"] },
+  //           { column_id: "status", column_values: ["Pending"] }
+  //       ]
+  //     ) {
+  //         items {
+  //             id
+  //             name
+  //         }
+  //     }
+  // }
+  // `
+  // monday.api(addRowQuery)
+  // .then(response => {
+  //   console.log('Webhook sent to Zapier:', response.data.items_page_by_column_values);
+  //   let results = response.data.items_page_by_column_values.items
+  //   results.map((item) => {
+  //     console.log(item)
+  //     let newData = getOrderDetails(item.name)
+  //   })
+  // }).catch((err)=>{
+  //   console.error('Error sending webhook to Zapier:', err);
+  // })
 // }, {
 //   scheduled: true,
-//   timezone: "America/Los_Angeles"
+//   // timezone: "America/New_York"
+//   timezone: "UTC"
 // });
 
-app.post("/move-order-to-shipday", async function (req, res) {
-  console.log("moving order");
-  console.log(req.body);
-  let payload = req.body;
-  // res.send(setInstructionTemplate(payload))
-  // return 
+async function getOrderDetails(jobId) {
+  const url = 'https://api.yelo.red/open/orders/getDetails';
+  const payload = {
+      api_key: process.env.YELO_API_KEY,
+      job_id: jobId
+  };
+
+  try {
+      const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+              'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+          throw new Error(`Error: ${response.status} ${response.statusText}`);
+      }
+      const data = await response.json();
+      console.log(data.data[0])
+      await sendOrderToShipday(data.data[0])
+      return data;
+  } catch (error) {
+      console.error('Error fetching order details:', error);
+  }
+}
+
+const sendOrderToShipday = async(payload) => {
   if (!payload) {
-    return res.status(400).send("Bad request: No payload provided.");
+    console.log('Payload not valid')
+    return false
   }
 
   let storeApi = `SHIPDAY_API_${payload.merchant_id}`;
@@ -44,42 +104,31 @@ app.post("/move-order-to-shipday", async function (req, res) {
   let deliveryTime = payload.job_delivery_datetime;
   if (!deliveryTime) {
     console.error("Invalid delivery time format.");
-    return res.status(400).send("Bad request: Invalid delivery time format.");
+    return false
   }
   let pickupTime = payload.job_pickup_datetime;
   if (!pickupTime) {
     console.error("Invalid pickup time format.");
-    return res.status(400).send("Bad request: Invalid pickup time format.");
+    return false
   }
 
-  deliveryTime = new Date(deliveryTime + " GMT-0700");
-  pickupTime = new Date(pickupTime + " GMT-0700");
+  const date = new Date(payload.job_time);
+  const timestamp = date.getTime();
+  console.log(timestamp);
+  let timezoneOffset = await dateTimeHandler.getTimeZoneFromCoordinates(payload.job_pickup_latitude, payload.job_pickup_longitude, timestamp)
 
-  const addRowQuery = `
-    mutation {
-      create_item (
-          board_id: 6343774897,
-          group_id: "topics",
-          item_name: "${payload.job_id}",
-          column_values: "{\\"status\\": \\"Pending\\", \\"text7\\": \\"${payload.task_type == 1 ? "Pickup" : "Delivery"}\\", \\"text\\": \\"${payload.merchant_name}\\", \\"text5\\": \\"${payload.customer_username}\\", \\"date4\\": {\\"date\\":\\"${extractDate(deliveryTime)}\\", \\"time\\":\\"${extractTime(deliveryTime)}\\"}, \\"dup__of_delivery_time3__1\\": {\\"date\\":\\"${extractDate(pickupTime)}\\", \\"time\\":\\"${extractTime(pickupTime)}\\"}, \\"location\\": {\\"lat\\":\\"1\\", \\"lng\\":\\"1\\", \\"address\\":\\"${payload.job_pickup_address}\\"}, \\"location3\\": {\\"lat\\":\\"1\\", \\"lng\\":\\"1\\", \\"address\\":\\"${payload.job_address}\\"}}"
-          ) {
-          id
-      }
-  }
-  `;
+  let GMTOFFSET= dateTimeHandler.applyOffset(pickupTime, timezoneOffset)
 
-  monday.api(addRowQuery)
-  .then(response => {
-    console.log('Webhook sent to Zapier:', response.data);
-  }).catch((err)=>{
-    console.error('Error sending webhook to Zapier:', err);
-  })
+  pickupTime = new Date(pickupTime + ` ${GMTOFFSET}`);
+  deliveryTime = new Date(deliveryTime + ` ${GMTOFFSET}`);
+  console.log(pickupTime)
+  console.log(deliveryTime)
 
-  let validStore = await validShipdayStore(payload.merchant_id+"")
-  if(!validStore){
-    res.send("Not a valid store for shipday order")
-    return
-  }
+  // let validStore = await validShipdayStore(payload.merchant_id+"")
+  // if(!validStore){
+  //   console.log("Not a valid store for shipday order")
+  //   return
+  // }
 
   const orderInfoRequest = new OrderInfoRequest(
     payload.job_id,
@@ -130,17 +179,168 @@ app.post("/move-order-to-shipday", async function (req, res) {
       console.error("Invalid order detail format:", detail);
     }
   });
+
   orderInfoRequest.setOrderItems(itemsArr);
-  shipdayClient.orderService
-    .insertOrder(orderInfoRequest)
-    .then((response) => {
-      console.log(response);
-      res.send("Shipway Order Created");
-    })
-    .catch((error) => {
-      console.error("Error creating Shipway order:", error);
-      res.status(500).send("Internal Server Error");
-    });
+  console.log('done')
+  try {
+    const response = await shipdayClient.orderService.insertOrder(orderInfoRequest);
+    console.log(response)
+    console.log("Shipway Order Created");
+    return true;
+  } catch (error) {
+    console.error("Error creating Shipway order:", error);
+    return false;
+  }
+  // await shipdayClient.orderService
+  //   .insertOrder(orderInfoRequest)
+  //   .then((response) => {
+  //     console.log("Shipway Order Created");
+  //     return true
+  //   })
+  //   .catch((error) => {
+  //     console.error("Error creating Shipway order:", error);
+  //     return false
+  //   });
+}
+
+app.post("/move-order-to-shipday", async function (req, res) {
+  console.log("moving order");
+  console.log(req.body);
+  let payload = req.body;
+  if (!payload) {
+    return res.status(400).send("Bad request: No payload provided.");
+  }
+
+  // let storeApi = `SHIPDAY_API_${payload.merchant_id}`;
+
+  // const shipdayClient = new Shipday(process.env[storeApi] || process.env.MAIN_SHIPDAY_API, 10000);
+
+  let deliveryTime = payload.job_delivery_datetime;
+  if (!deliveryTime) {
+    console.error("Invalid delivery time format.");
+    return res.status(400).send("Bad request: Invalid delivery time format.");
+  }
+  let pickupTime = payload.job_pickup_datetime;
+  if (!pickupTime) {
+    console.error("Invalid pickup time format.");
+    return res.status(400).send("Bad request: Invalid pickup time format.");
+  }
+
+  const date = new Date(req.body.job_time);
+  const timestamp = date.getTime();
+  console.log(timestamp);
+  let timezoneOffset = await dateTimeHandler.getTimeZoneFromCoordinates(req.body.job_pickup_latitude, req.body.job_pickup_longitude, timestamp)
+
+  let GMTOFFSET= dateTimeHandler.applyOffset(pickupTime, timezoneOffset)
+
+  pickupTime = new Date(pickupTime + ` ${GMTOFFSET}`);
+  // res.send('test')
+  // return
+  deliveryTime = new Date(deliveryTime + ` ${GMTOFFSET}`);
+  console.log(pickupTime)
+  console.log(deliveryTime)
+  // unique
+  const addRowQuery = `
+    mutation {
+      create_item (
+          board_id: 6343774897,
+          group_id: "topics",
+          item_name: "${payload.job_id}",
+          column_values: "{\\"status\\": \\"Pending\\", \\"text7\\": \\"${payload.task_type == 1 ? "Pickup" : "Delivery"}\\", \\"text\\": \\"${payload.merchant_name}\\", \\"text5\\": \\"${payload.customer_username}\\", \\"date4\\": {\\"date\\":\\"${extractDate(deliveryTime)}\\", \\"time\\":\\"${extractTime(deliveryTime)}\\"}, \\"dup__of_delivery_time3__1\\": {\\"date\\":\\"${extractDate(pickupTime)}\\", \\"time\\":\\"${extractTime(pickupTime)}\\"}, \\"location\\": {\\"lat\\":\\"1\\", \\"lng\\":\\"1\\", \\"address\\":\\"${payload.job_pickup_address}\\"}, \\"location3\\": {\\"lat\\":\\"1\\", \\"lng\\":\\"1\\", \\"address\\":\\"${payload.job_address}\\"}}"
+          ) {
+          id
+      }
+  }
+  `;
+
+  monday.api(addRowQuery)
+  .then(response => {
+    console.log('Webhook sent to Zapier:', response.data);
+  }).catch((err)=>{
+    console.error('Error sending webhook to Zapier:', err);
+  })
+  // unique
+
+
+  console.log('pickup time is ', pickupTime)
+  let utc_date = new Date()
+  console.log("date1 is ", utc_date)
+  console.log(utc_date.getUTCDate())
+  // if(utc_date.getUTCDate() == pickupTime.getUTCDate()){
+  //   console.log('pickup time is today')
+  // }else{
+  //   console.log('will be moved to shipday on pickup date')
+  //   res.send('will be moved to shipday on pickup date')
+  //   return
+  // }
+
+  const shipwayResponse = await sendOrderToShipday(payload)
+  if(shipwayResponse){
+    res.send("Shipway Order Created");
+  }else{
+    res.status(500).send("Internal Server Error");
+  }
+  return
+  // const orderInfoRequest = new OrderInfoRequest(
+  //   payload.job_id,
+  //   payload.merchant_address === payload.job_address ? payload.merchant_name : payload.customer_username,
+  //   payload.job_address,
+  //   payload.merchant_address === payload.job_address ? payload.merchant_email : payload.customer_email,
+  //   payload.merchant_address === payload.job_address ? payload.merchant_phone_number : payload.customer_phone,
+  //   payload.merchant_address === payload.job_address ? payload.customer_username : payload.merchant_name,
+  //   payload.job_pickup_address,
+  // );
+
+  // orderInfoRequest.setRestaurantPhoneNumber(payload.merchant_address === payload.job_address ? payload.job_pickup_phone : payload.merchant_phone_number);
+  // orderInfoRequest.setExpectedDeliveryDate(extractDate(deliveryTime));
+  // orderInfoRequest.setExpectedDeliveryTime(extractTime(deliveryTime));
+  // orderInfoRequest.setExpectedPickupTime(extractTime(pickupTime));
+  // orderInfoRequest.setPickupLatLong(payload.job_pickup_latitude, payload.job_pickup_longitude);
+  // orderInfoRequest.setDeliveryLatLong(payload.job_latitude, payload.job_longitude);
+  
+  // if(payload.tip !== 0){
+  //   orderInfoRequest.setTips(payload.tip);
+  // }
+  // if(payload.tax !== 0){
+  //   orderInfoRequest.setTax(payload.tax);
+  // }
+  // let new_desc = setInstructionTemplate(payload)
+  // if(new_desc){
+  //   orderInfoRequest.setDeliveryInstruction(
+  //       new_desc
+  //       );
+  // }
+  // orderInfoRequest.setTotalOrderCost(payload.total_order_amount);
+  // const paymentOption = PaymentMethod.CREDIT_CARD;
+  // const cardType = CardType.AMEX;
+
+  // orderInfoRequest.setPaymentMethod(paymentOption);
+  // orderInfoRequest.setCreditCardType(cardType);
+
+  // const itemsArr = [];
+
+  // payload.orderDetails?.forEach(detail => {
+  //   const productName = detail?.product?.product_name;
+  //   const price = detail?.product?.unit_price;
+  //   const quantity = detail?.product?.quantity;
+    
+  //   if (productName && price && quantity) {
+  //     itemsArr.push(new OrderItem(productName, price, quantity));
+  //   } else {
+  //     console.error("Invalid order detail format:", detail);
+  //   }
+  // });
+  // orderInfoRequest.setOrderItems(itemsArr);
+  // shipdayClient.orderService
+  //   .insertOrder(orderInfoRequest)
+  //   .then((response) => {
+  //     console.log(response);
+  //     res.send("Shipway Order Created");
+  //   })
+  //   .catch((error) => {
+  //     console.error("Error creating Shipway order:", error);
+  //     res.status(500).send("Internal Server Error");
+  //   });
 });
 
 app.post("/edit-order-on-Monday", async function(req, res) {
@@ -199,7 +399,7 @@ app.post("/edit-order-on-Monday", async function(req, res) {
 
 function extractDate(pacificDate){
   const year = pacificDate.getUTCFullYear();
-  const month = String(pacificDate.getUTCMonth() + 1).padStart(2, '0'); // Months are zero-based
+  const month = String(pacificDate.getUTCMonth() + 1).padStart(2, '0'); 
   const day = String(pacificDate.getUTCDate()).padStart(2, '0');
 
   const date = `${year}-${month}-${day}`;
