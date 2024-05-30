@@ -211,10 +211,6 @@ app.post("/move-order-to-shipday", async function (req, res) {
     return res.status(400).send("Bad request: No payload provided.");
   }
 
-  // let storeApi = `SHIPDAY_API_${payload.merchant_id}`;
-
-  // const shipdayClient = new Shipday(process.env[storeApi] || process.env.MAIN_SHIPDAY_API, 10000);
-
   let deliveryTime = payload.job_delivery_datetime;
   if (!deliveryTime) {
     console.error("Invalid delivery time format.");
