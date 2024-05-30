@@ -115,7 +115,10 @@ const sendOrderToShipday = async(payload) => {
   const date = new Date(payload.job_time);
   const timestamp = date.getTime();
   console.log(timestamp);
-  let timezoneOffset = await dateTimeHandler.getTimeZoneFromCoordinates(payload.job_pickup_latitude, payload.job_pickup_longitude, timestamp)
+  let latitude_timezone = payload.task_type == 1 ? payload.job_pickup_latitude : payload.job_latitude;
+  let longitude_timezone = payload.task_type == 1 ? payload.job_pickup_longitude : payload.job_longitude;
+  let timezoneOffset = await dateTimeHandler.getTimeZoneFromCoordinates(latitude_timezone, longitude_timezone, timestamp)
+  // let timezoneOffset = await dateTimeHandler.getTimeZoneFromCoordinates(payload.job_pickup_latitude, payload.job_pickup_longitude, timestamp)
 
   let GMTOFFSET= dateTimeHandler.applyOffset(pickupTime, timezoneOffset)
 
@@ -225,7 +228,9 @@ app.post("/move-order-to-shipday", async function (req, res) {
   const date = new Date(req.body.job_time);
   const timestamp = date.getTime();
   console.log(timestamp);
-  let timezoneOffset = await dateTimeHandler.getTimeZoneFromCoordinates(req.body.job_pickup_latitude, req.body.job_pickup_longitude, timestamp)
+  let latitude_timezone = payload.task_type == 1 ? payload.job_pickup_latitude : payload.job_latitude;
+  let longitude_timezone = payload.task_type == 1 ? payload.job_pickup_longitude : payload.job_longitude;
+  let timezoneOffset = await dateTimeHandler.getTimeZoneFromCoordinates(latitude_timezone, longitude_timezone, timestamp)
 
   let GMTOFFSET= dateTimeHandler.applyOffset(pickupTime, timezoneOffset)
 
