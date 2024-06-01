@@ -127,11 +127,11 @@ const sendOrderToShipday = async(payload) => {
   console.log(pickupTime)
   console.log(deliveryTime)
 
-  // let validStore = await validShipdayStore(payload.merchant_id+"")
-  // if(!validStore){
-  //   console.log("Not a valid store for shipday order")
-  //   return
-  // }
+  let validStore = await validShipdayStore(payload.merchant_id+"")
+  if(!validStore){
+    console.log("Not a valid store for shipday order")
+    return
+  }
 
   const orderInfoRequest = new OrderInfoRequest(
     payload.job_id,
