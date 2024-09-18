@@ -214,6 +214,13 @@ app.post("/move-order-to-shipday", async function (req, res) {
     return res.status(400).send("Bad request: No payload provided.");
   }
 
+  let validStore = await validShipdayStore(payload.merchant_id+"")
+  if(!validStore){
+    console.log("Not a valid store for shipday order")
+    res.send("Not a valid store for shipday order")
+    return
+  }
+
   let deliveryTime = payload.job_delivery_datetime;
   if (!deliveryTime) {
     console.error("Invalid delivery time format.");
@@ -247,7 +254,7 @@ app.post("/move-order-to-shipday", async function (req, res) {
           board_id: 6343774897,
           group_id: "topics",
           item_name: "${payload.job_id}",
-          column_values: "{\\"status\\": \\"Pending\\", \\"text7\\": \\"${payload.task_type == 1 ? "Pickup" : "Delivery"}\\", \\"text\\": \\"${payload.merchant_name}\\", \\"text5\\": \\"${payload.customer_username}\\", \\"date4\\": {\\"date\\":\\"${extractDate(deliveryTime)}\\", \\"time\\":\\"${extractTime(deliveryTime)}\\"}, \\"dup__of_delivery_time3__1\\": {\\"date\\":\\"${extractDate(pickupTime)}\\", \\"time\\":\\"${extractTime(pickupTime)}\\"}, \\"location\\": {\\"lat\\":\\"1\\", \\"lng\\":\\"1\\", \\"address\\":\\"${payload.job_pickup_address}\\"}, \\"location3\\": {\\"lat\\":\\"1\\", \\"lng\\":\\"1\\", \\"address\\":\\"${payload.job_address}\\"}}"
+          column_values: "{\\"status\\": \\"Pending\\", \\"status_1__1\\": \\"${payload.merchant_id == "1634421" ? "VLO" : "Corporate"}\\", \\"text7\\": \\"${payload.task_type == 1 ? "Pickup" : "Delivery"}\\", \\"text\\": \\"${payload.merchant_name}\\", \\"text5\\": \\"${payload.customer_username}\\", \\"date4\\": {\\"date\\":\\"${extractDate(deliveryTime)}\\", \\"time\\":\\"${extractTime(deliveryTime)}\\"}, \\"dup__of_delivery_time3__1\\": {\\"date\\":\\"${extractDate(pickupTime)}\\", \\"time\\":\\"${extractTime(pickupTime)}\\"}, \\"location\\": {\\"lat\\":\\"1\\", \\"lng\\":\\"1\\", \\"address\\":\\"${payload.job_pickup_address}\\"}, \\"location3\\": {\\"lat\\":\\"1\\", \\"lng\\":\\"1\\", \\"address\\":\\"${payload.job_address}\\"}}"
           ) {
           id
       }
@@ -260,13 +267,12 @@ app.post("/move-order-to-shipday", async function (req, res) {
   }).catch((err)=>{
     console.error('Error sending webhook to Zapier:', err);
   })
-  // unique
+  // // unique
 
-
-  console.log('pickup time is ', pickupTime)
-  let utc_date = new Date()
-  console.log("date1 is ", utc_date)
-  console.log(utc_date.getUTCDate())
+  // console.log('pickup time is ', pickupTime)
+  // let utc_date = new Date()
+  // console.log("date1 is ", utc_date)
+  // console.log(utc_date.getUTCDate())
   // if(utc_date.getUTCDate() == pickupTime.getUTCDate()){
   //   console.log('pickup time is today')
   // }else{
@@ -348,7 +354,6 @@ app.post("/edit-order-on-Monday", async function(req, res) {
   console.log("updating order");
   console.log(req.body);
   let payload = req.body;
-
   if (!payload || !payload.job_id) {
     return res.status(400).send('Bad request: Missing job ID in payload.');
   }
@@ -439,11 +444,16 @@ async function validShipdayStore(storeId){
   try {
     const response = await monday.api(storeQuery);
     const textValues = response.data.boards[0].items_page.items.map(item => {
+      // console.log(item.column_values)
       const textColumn = item.column_values.find(col => col.id === 'text');
       return textColumn ? textColumn.text : null;
     }).filter(text => text !== null && text !== '');
 
     const validStores = textValues;
+    // ID For Marwan VLO
+    validStores.push('1634421');
+    console.log(validStores)
+    console.log(storeId)
     return validStores.includes(storeId);
   } catch (err) {
     console.error('Error sending webhook to Zapier:', err);
